@@ -1,0 +1,367 @@
+"""
+Training Planner - Приложение для планирования тренировок
+Автор: Галкаина Валерия
+Версия: 1.0.0
+"""
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import json
+import os
+from datetime import datetime
+import re
+
+
+class TrainingPlanner:
+    """Главный класс приложения Training Planner"""
+    
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Training Planner - План тренировок")
+        self.root.geometry("900x600")
+        self.root.resizable(True, True)
+        
+        # Файл для хранения данных
+        self.data_file = "trainings.json"
+        
+        # Список тренировок
+        self.trainings = []
+        
+        # Доступные типы тренировок
+        self.training_types = ["Бег", "Плавание", "Велосипед", "Силовая", "Йога", "Растяжка"]
+        
+        # Загрузка сохраненных данных
+        self.load_data()
+        
+        # Создание интерфейса
+        self.create_widgets()
+        
+        # Обновление таблицы
+        self.refresh_table()
+        
+        # Центрирование окна
+        self.center_window()
+    
+    def center_window(self):
+        """Центрирует окно на экране"""
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f'{width}x{height}+{x}+{y}')
+    
+    def create_widgets(self):
+        """Создает все элементы интерфейса"""
+        
+        # Основной контейнер
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # ========== Панель ввода данных ==========
+        input_frame = ttk.LabelFrame(main_frame, text="Добавление тренировки", padding="10")
+        input_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Поле Дата
+        ttk.Label(input_frame, text="Дата (ГГГГ-ММ-ДД):", font=("Arial", 10)).grid(row=0, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+        self.date_entry = ttk.Entry(input_frame, width=20, font=("Arial", 10))
+        self.date_entry.grid(row=0, column=1, padx=(0, 20), pady=5)
+        self.date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))  # Текущая дата по умолчанию
+        
+        # Поле Тип тренировки
+        ttk.Label(input_frame, text="Тип тренировки:", font=("Arial", 10)).grid(row=0, column=2, sticky=tk.W, padx=(0, 10), pady=5)
+        self.type_var = tk.StringVar()
+        self.type_combo = ttk.Combobox(input_frame, textvariable=self.type_var, 
+                                       values=self.training_types,
+                                       state="readonly", width=15, font=("Arial", 10))
+        self.type_combo.grid(row=0, column=3, padx=(0, 20), pady=5)
+        self.type_combo.set("Бег")
+        
+        # Поле Длительность
+        ttk.Label(input_frame, text="Длительность (мин):", font=("Arial", 10)).grid(row=0, column=4, sticky=tk.W, padx=(0, 10), pady=5)
+        self.duration_entry = ttk.Entry(input_frame, width=10, font=("Arial", 10))
+        self.duration_entry.grid(row=0, column=5, padx=(0, 20), pady=5)
+        
+        # Кнопка Добавить
+        self.add_btn = ttk.Button(input_frame, text="➕ Добавить тренировку", command=self.add_training)
+        self.add_btn.grid(row=0, column=6, padx=(0, 0), pady=5)
+        
+        # ========== Панель фильтрации ==========
+        filter_frame = ttk.LabelFrame(main_frame, text="Фильтрация", padding="10")
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Фильтр по типу
+        ttk.Label(filter_frame, text="Фильтр по типу:", font=("Arial", 10)).grid(row=0, column=0, sticky=tk.W, padx=(0, 10), pady=5)
+        self.filter_type_var = tk.StringVar(value="Все")
+        self.filter_type_combo = ttk.Combobox(filter_frame, textvariable=self.filter_type_var,
+                                              values=["Все"] + self.training_types,
+                                              state="readonly", width=15, font=("Arial", 10))
+        self.filter_type_combo.grid(row=0, column=1, padx=(0, 20), pady=5)
+        
+        # Фильтр по дате
+        ttk.Label(filter_frame, text="Фильтр по дате:", font=("Arial", 10)).grid(row=0, column=2, sticky=tk.W, padx=(0, 10), pady=5)
+        self.filter_date_entry = ttk.Entry(filter_frame, width=15, font=("Arial", 10))
+        self.filter_date_entry.grid(row=0, column=3, padx=(0, 10), pady=5)
+        self.filter_date_entry.insert(0, "Все")
+        
+        # Кнопка Применить фильтр
+        self.apply_filter_btn = ttk.Button(filter_frame, text="🔍 Применить фильтр", command=self.apply_filter)
+        self.apply_filter_btn.grid(row=0, column=4, padx=(10, 0), pady=5)
+        
+        # Кнопка Сбросить фильтр
+        self.reset_filter_btn = ttk.Button(filter_frame, text="🗑 Сбросить фильтр", command=self.reset_filter)
+        self.reset_filter_btn.grid(row=0, column=5, padx=(10, 0), pady=5)
+        
+        # ========== Таблица тренировок ==========
+        table_frame = ttk.LabelFrame(main_frame, text="Список тренировок", padding="10")
+        table_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Создание таблицы
+        columns = ("id", "date", "type", "duration")
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=15)
+        
+        # Настройка заголовков
+        self.tree.heading("id", text="№")
+        self.tree.heading("date", text="Дата")
+        self.tree.heading("type", text="Тип тренировки")
+        self.tree.heading("duration", text="Длительность (мин)")
+        
+        # Настройка ширины колонок
+        self.tree.column("id", width=50, anchor=tk.CENTER)
+        self.tree.column("date", width=120, anchor=tk.CENTER)
+        self.tree.column("type", width=150, anchor=tk.CENTER)
+        self.tree.column("duration", width=120, anchor=tk.CENTER)
+        
+        # Полосы прокрутки
+        scrollbar_y = ttk.Scrollbar(table_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        scrollbar_x = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree.configure(yscrollcommand=scrollbar_y.set, xscrollcommand=scrollbar_x.set)
+        
+        # Размещение таблицы и скроллбаров
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        scrollbar_y.grid(row=0, column=1, sticky="ns")
+        scrollbar_x.grid(row=1, column=0, sticky="ew")
+        
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
+        
+        # Кнопка удаления
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        self.delete_btn = ttk.Button(button_frame, text="🗑 Удалить выбранную", command=self.delete_training)
+        self.delete_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Статусная строка
+        self.status_label = ttk.Label(main_frame, text="Готово", relief=tk.SUNKEN, anchor=tk.W)
+        self.status_label.pack(fill=tk.X, pady=(10, 0))
+        
+        # Привязка клавиш
+        self.root.bind('<Return>', lambda event: self.add_training())
+        self.root.bind('<Delete>', lambda event: self.delete_training())
+    
+    def validate_date(self, date_string):
+        """
+        Проверка корректности формата даты
+        
+        Args:
+            date_string: строка с датой
+            
+        Returns:
+            bool: True если дата корректна, иначе False
+        """
+        pattern = r'^\d{4}-\d{2}-\d{2}$'
+        if not re.match(pattern, date_string):
+            return False
+        
+        try:
+            datetime.strptime(date_string, "%Y-%m-%d")
+            return True
+        except ValueError:
+            return False
+    
+    def validate_duration(self, duration_string):
+        """
+        Проверка корректности длительности
+        
+        Args:
+            duration_string: строка с длительностью
+            
+        Returns:
+            tuple: (is_valid, value)
+        """
+        try:
+            duration = float(duration_string)
+            if duration > 0:
+                return True, duration
+            else:
+                return False, None
+        except ValueError:
+            return False, None
+    
+    def add_training(self):
+        """Добавление новой тренировки"""
+        
+        # Получение данных
+        date = self.date_entry.get().strip()
+        training_type = self.type_var.get()
+        duration_str = self.duration_entry.get().strip()
+        
+        # Валидация даты
+        if not self.validate_date(date):
+            messagebox.showerror("Ошибка валидации",
+                               f"Некорректный формат даты: '{date}'\n\n"
+                               "Дата должна быть в формате ГГГГ-ММ-ДД\n"
+                               "Пример: 2024-12-25")
+            return
+        
+        # Валидация длительности
+        is_valid, duration = self.validate_duration(duration_str)
+        if not is_valid:
+            messagebox.showerror("Ошибка валидации",
+                               f"Некорректная длительность: '{duration_str}'\n\n"
+                               "Длительность должна быть положительным числом\n"
+                               "Пример: 30, 45.5")
+            return
+        
+        # Создание записи
+        training = {
+            "date": date,
+            "type": training_type,
+            "duration": duration
+        }
+        
+        # Добавление в список
+        self.trainings.append(training)
+        
+        # Сохранение данных
+        self.save_data()
+        
+        # Обновление таблицы
+        self.refresh_table()
+        
+        # Очистка полей
+        self.duration_entry.delete(0, tk.END)
+        
+        # Обновление статуса
+        self.status_label.config(text=f"✓ Добавлена тренировка: {date} - {training_type} ({duration} мин)")
+        
+        # Фокус на поле длительности
+        self.duration_entry.focus()
+    
+    def delete_training(self):
+        """Удаление выбранной тренировки"""
+        
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Удаление", "Пожалуйста, выберите тренировку для удаления")
+            return
+        
+        # Получение индекса
+        item = self.tree.item(selected[0])
+        index = item['values'][0] - 1
+        
+        # Подтверждение удаления
+        training_to_delete = self.trainings[index]
+        if messagebox.askyesno("Подтверждение удаления",
+                              f"Вы уверены, что хотите удалить тренировку?\n\n"
+                              f"Дата: {training_to_delete['date']}\n"
+                              f"Тип: {training_to_delete['type']}\n"
+                              f"Длительность: {training_to_delete['duration']} мин"):
+            
+            # Удаление
+            del self.trainings[index]
+            
+            # Сохранение
+            self.save_data()
+            
+            # Обновление
+            self.refresh_table()
+            
+            # Обновление статуса
+            self.status_label.config(text=f"✓ Удалена тренировка от {training_to_delete['date']}")
+    
+    def apply_filter(self):
+        """Применение фильтров к таблице"""
+        
+        filter_type = self.filter_type_var.get()
+        filter_date = self.filter_date_entry.get().strip()
+        
+        filtered_trainings = []
+        
+        for training in self.trainings:
+            # Фильтр по типу
+            if filter_type != "Все" and training["type"] != filter_type:
+                continue
+            
+            # Фильтр по дате
+            if filter_date != "Все" and filter_date != "" and training["date"] != filter_date:
+                continue
+            
+            filtered_trainings.append(training)
+        
+        # Обновление таблицы
+        self.display_trainings(filtered_trainings)
+        
+        # Обновление статуса
+        self.status_label.config(text=f"🔍 Показано {len(filtered_trainings)} из {len(self.trainings)} тренировок")
+    
+    def reset_filter(self):
+        """Сброс всех фильтров"""
+        
+        self.filter_type_var.set("Все")
+        self.filter_date_entry.delete(0, tk.END)
+        self.filter_date_entry.insert(0, "Все")
+        
+        self.refresh_table()
+        self.status_label.config(text="✓ Фильтры сброшены")
+    
+    def refresh_table(self):
+        """Обновление таблицы со всеми записями"""
+        self.display_trainings(self.trainings)
+        self.status_label.config(text=f"📋 Всего тренировок: {len(self.trainings)}")
+    
+    def display_trainings(self, trainings_list):
+        """Отображение списка тренировок в таблице"""
+        
+        # Очистка таблицы
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        
+        # Добавление записей
+        for i, training in enumerate(trainings_list, start=1):
+            self.tree.insert("", tk.END, values=(
+                i,
+                training["date"],
+                training["type"],
+                f"{training['duration']:.1f}" if isinstance(training['duration'], float) else str(training['duration'])
+            ))
+    
+    def save_data(self):
+        """Сохранение данных в JSON файл"""
+        try:
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(self.trainings, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            messagebox.showerror("Ошибка сохранения", f"Не удалось сохранить данные: {str(e)}")
+    
+    def load_data(self):
+        """Загрузка данных из JSON файла"""
+        if os.path.exists(self.data_file):
+            try:
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    self.trainings = json.load(f)
+            except Exception as e:
+                messagebox.showerror("Ошибка загрузки", f"Не удалось загрузить данные: {str(e)}")
+                self.trainings = []
+
+
+def main():
+    """Главная функция запуска приложения"""
+    root = tk.Tk()
+    app = TrainingPlanner(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
